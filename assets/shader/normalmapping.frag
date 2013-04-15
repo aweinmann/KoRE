@@ -18,7 +18,7 @@ vec4 phong(in vec2 uv, in vec3 normal, in vec3 lVec, in vec3 vVec)
     vec4 vAmbient = 0.2 * vec4(1,1,1,1) * texColor;
     vVec = normalize(vVec);
     normal = normalize(normal);
-    float intensity = 1;
+    float intensity = 0.5;
     vec3 lVecNorm = normalize(lVec);
     float lambert = max(dot(normal,lVecNorm), 0.0);
     if(lambert > 0){

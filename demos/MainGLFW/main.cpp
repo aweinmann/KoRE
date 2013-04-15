@@ -26,6 +26,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <iostream>
 #include <string>
 #include <ctime>
 #include <vector>
@@ -53,10 +54,32 @@
 #include "KoRE/Events.h"
 #include "Kore/Operations/OperationFactory.h"
 
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libswscale/swscale.h>
+#include <libavformat/avformat.h>
+#include <libavutil/opt.h>
+#include <libavutil/channel_layout.h>
+#include <libavutil/common.h>
+#include <libavutil/imgutils.h>
+#include <libavutil/mathematics.h>
+#include <libavutil/samplefmt.h>
+}
+
 kore::SceneNode* rotationNode = NULL;
 kore::SceneNode* lightNode = NULL;
 kore::Camera* pCamera = NULL;
 
+uint8_t* colorbuffer;
+AVOutputFormat* fmt;
+AVFormatContext* oc;
+AVCodec* codec;
+AVStream* st;
+AVCodecContext* c;
+int video_outbuf_size;
+uint8_t *video_outbuf;
+AVFrame *picture, *tmp_picture;
+struct SwsContext* converter;
 /*void CALLBACK DebugLog(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar* message, GLvoid* userParams) {
   //Log::getInstance()->write("[ERROR] Type: %s, Source: %s, Severity: %s\n", 
     //  glGetStringForType(type).c_str(),)
@@ -64,6 +87,299 @@ kore::Camera* pCamera = NULL;
 } */
 
 //awaits simple shader
+
+static AVFrame *alloc_picture(AVPixelFormat pix_fmt, int width, int height)
+{
+  AVFrame *picture;
+  uint8_t *picture_buf;
+
+  picture = avcodec_alloc_frame();
+  if (!picture)
+    return NULL;
+
+  const size_t size = avpicture_get_size(pix_fmt, width, height);
+  picture_buf = (uint8_t*)(size);
+  if (!picture_buf) {
+    av_free(picture);
+    return NULL;
+  }
+  avpicture_fill((AVPicture *)picture, picture_buf,
+    pix_fmt, width, height);
+  return picture;
+}
+
+void initffmpeg(const char* filename,unsigned int width,unsigned int height, unsigned int framerate){
+ 
+  int buffersize = 800*600*4;
+  colorbuffer = new uint8_t[buffersize];
+  memset(colorbuffer,255,buffersize);
+  
+  av_register_all();
+  avcodec_register_all();
+
+  fmt = av_guess_format(NULL, filename, NULL);
+  if (!fmt) {
+    printf("Could not deduce output format from file extension: using MPEG.\n");
+    fmt = av_guess_format("mpeg", NULL, NULL);
+  }
+
+  oc = avformat_alloc_context();
+  if (!oc) {
+    fprintf(stderr, "Memory error\n");
+    exit(1);
+  }
+  oc->oformat = fmt;
+ 
+  _snprintf(oc->filename, sizeof(oc->filename), "%s", filename);
+
+  codec = avcodec_find_encoder(CODEC_ID_H264);
+  if (!codec) {
+    fprintf(stderr, "codec not found\n");
+    exit(1);
+  }
+  st = avformat_new_stream(oc, codec);
+  if (!st) {
+    fprintf(stderr, "Could not alloc stream\n");
+    exit(1);
+  }
+  st->id = 1;
+
+  c = st->codec;
+  c->codec_id = CODEC_ID_H264;
+  c->codec_type = AVMEDIA_TYPE_VIDEO;
+  //c->bit_rate = 400000;
+  c->width = width;
+  c->height = height;
+  c->time_base.den = framerate;
+  c->time_base.num = 1;
+  //c->gop_size = 12; /* emit one intra frame every twelve frames at most */
+  //c->gop_size = 25;
+  c->pix_fmt = PIX_FMT_YUV420P;
+  if(oc->oformat->flags & AVFMT_GLOBALHEADER)
+    c->flags |= CODEC_FLAG_GLOBAL_HEADER;
+     
+      //?av_set_parameters?
+ /* if (avformat_write_header(oc, NULL) < 0) {
+    fprintf(stderr, "Invalid output format parameters\n");
+    exit(1);
+  }*/
+  av_dump_format(oc,0,filename,1);
+  
+  AVDictionary* conf = NULL;
+  av_dict_set(&conf, "crf", "0", 0);
+  av_dict_set(&conf, "preset", "veryslow", 0);
+  if (avcodec_open2(c, codec, &conf) < 0) {
+    fprintf(stderr, "could not open codec\n");
+    exit(1);
+  }
+
+  video_outbuf_size = 2000000;
+  video_outbuf = (uint8_t*)(video_outbuf_size);
+
+  picture = alloc_picture(c->pix_fmt, c->width, c->height);
+  if (!picture) {
+    fprintf(stderr, "Could not allocate picture\n");
+    exit(1);
+  }
+
+  tmp_picture = alloc_picture(PIX_FMT_BGRA, width, height);
+  if (!tmp_picture) {
+    fprintf(stderr, "Could not allocate temporary picture\n");
+    exit(1);
+  }
+
+  if (avio_open(&oc->pb, filename, AVIO_FLAG_WRITE) < 0) {
+    fprintf(stderr, "Could not open '%s'\n", filename);
+    exit(1);
+  }
+
+  /* write the stream header, if any */
+  avformat_write_header(oc, NULL);
+
+  converter = sws_getContext(
+    width, height, PIX_FMT_BGRA,
+    width, height, c->pix_fmt,
+    SWS_FAST_BILINEAR, NULL, NULL, NULL
+    );
+}
+
+int readbuffer(){
+  glReadBuffer(GL_BACK); 
+  glReadPixels(0,0,800,600,GL_BGRA,GL_UNSIGNED_BYTE,colorbuffer);
+    
+  const uint8_t* data = colorbuffer + 800*600*4;
+  const uint8_t* tmp[4] = { data, NULL, NULL, NULL };
+  int stride[4] = { -800*4, 0, 0, 0 };
+
+  sws_scale(converter, tmp, stride,
+    0, 600, picture->data, picture->linesize);
+
+  static int64_t frame_counter = 0;
+  picture->pts = frame_counter++;
+
+  const size_t out_size = avcodec_encode_video(c, video_outbuf, video_outbuf_size, picture);
+
+  /* If out_size is zero the data was buffered */
+  if ( out_size == 0 ){
+    return 0;
+  }
+
+  AVPacket pkt;
+  av_init_packet(&pkt);
+  pkt.pts = pkt.dts = AV_NOPTS_VALUE;
+
+  if (c->coded_frame->pts != AV_NOPTS_VALUE){
+    pkt.pts = av_rescale_q(c->coded_frame->pts, c->time_base, st->time_base);
+  }
+
+  if(c->coded_frame->key_frame)
+    pkt.flags |= AV_PKT_FLAG_KEY;
+
+  pkt.stream_index = st->index;
+  pkt.data = video_outbuf;
+  pkt.size = out_size;
+
+  return av_write_frame(oc, &pkt);
+}
+/*
+void videoEncode(const char *filename, AVCodecID codec_id, uint8_t *colorbuffer){
+  avcodec_register_all();
+  AVCodec *codec;
+  AVCodecContext *c= NULL;
+  int i, ret, x, y, got_output;
+  FILE *f;
+  AVFrame *frame;
+  AVPacket pkt;
+  uint8_t endcode[] = { 0, 0, 1, 0xb7 };
+  printf("Encode video file %s\n", filename);
+
+  uint8_t *src_data[4] = {colorbuffer,NULL,NULL,NULL};
+  uint8_t *dst_data[3];
+  int src_linesize[4], dst_linesize[4];
+  int dst_bufsize;
+  struct SwsContext *sws_ctx;
+  sws_ctx = sws_getContext(800,600,AV_PIX_FMT_RGBA,800,600,AV_PIX_FMT_YUV420P,SWS_BILINEAR,NULL,NULL,NULL);
+  
+  av_image_alloc(src_data, src_linesize, 800, 600, AV_PIX_FMT_RGBA, 16);
+  dst_bufsize = av_image_alloc(dst_data, dst_linesize, 800, 600, AV_PIX_FMT_YUV420P, 1);
+
+  sws_scale(sws_ctx, (const uint8_t * const*)src_data, src_linesize, 0, 600, dst_data, dst_linesize);
+
+
+  codec = avcodec_find_encoder(codec_id);
+
+  if (!codec) {
+    fprintf(stderr, "Codec not found\n");
+    exit(1);
+  }
+
+  c = avcodec_alloc_context3(codec);
+  if (!c) {
+    fprintf(stderr, "Could not allocate video codec context\n");
+    exit(1);
+  }
+
+  / * put sample parameters * /
+  c->bit_rate = 400000;
+  / * resolution must be a multiple of two * /
+  c->width = 800;
+  c->height = 600;
+  / * frames per second * /
+  //c->time_base= (AVRational){1,25};
+  c->gop_size = 10; / * emit one intra frame every ten frames * /
+  c->max_b_frames=1;
+  c->pix_fmt = AV_PIX_FMT_YUV420P;
+
+  if(codec_id == AV_CODEC_ID_H264)
+    av_opt_set(c->priv_data, "preset", "slow", 0);
+
+  if (avcodec_open2(c, codec, NULL) < 0) {
+    fprintf(stderr, "Could not open codec\n");
+    exit(1);
+  }
+
+  f = fopen(filename, "wb");
+  if (!f) {
+    fprintf(stderr, "Could not open %s\n", filename);
+    exit(1);
+  }
+
+  frame = avcodec_alloc_frame();
+  if (!frame) {
+    fprintf(stderr, "Could not allocate video frame\n");
+    exit(1);
+  }
+  frame->format = c->pix_fmt;
+  frame->width  = c->width;
+  frame->height = c->height;
+
+  ret = av_image_alloc(frame->data, frame->linesize, c->width, c->height,
+    c->pix_fmt, 32);
+  if (ret < 0) {
+    fprintf(stderr, "Could not allocate raw picture buffer\n");
+    exit(1);
+  }
+  
+ 
+    av_init_packet(&pkt);
+    pkt.data = NULL;    // packet data will be allocated by the encoder
+    pkt.size = 0;
+    fflush(stdout);
+
+
+    / * prepare a image * /
+    / * Y * /
+    for(y=0;y<c->height;y++) {
+      for(x=0;x<c->width;x++) {
+        frame->data[0][y * frame->linesize[0] + x] = dst_data[0][y * frame->linesize[0] + x];
+      }
+    }
+
+    / * Cb and Cr * /
+    for(y=0;y<c->height/2;y++) {
+      for(x=0;x<c->width/2;x++) {
+        frame->data[1][y * frame->linesize[1] + x] = dst_data[1][y * frame->linesize[1] + x];
+        frame->data[2][y * frame->linesize[2] + x] = dst_data[2][y * frame->linesize[2] + x];
+      }
+    }
+    
+    / * encode the image * /
+    ret = avcodec_encode_video2(c, &pkt, frame, &got_output);
+    if (ret < 0) {
+      fprintf(stderr, "Error encoding frame\n");
+      exit(1);
+    }
+    if (got_output) {
+      printf("Write frame  (size=%5d)\n", pkt.size);
+      fwrite(pkt.data, 1, pkt.size, f);
+      av_free_packet(&pkt);
+    }
+    / * get the delayed frames * /
+   
+      fflush(stdout);
+      ret = avcodec_encode_video2(c, &pkt, NULL, &got_output);
+      if (ret < 0) {
+        fprintf(stderr, "Error encoding frame\n");
+        exit(1);
+      }
+      if (got_output) {
+        printf("Write frame (size=%5d)\n", pkt.size);
+        fwrite(pkt.data, 1, pkt.size, f);
+        av_free_packet(&pkt);
+      }
+    
+    / * add sequence end code to have a real mpeg file * /
+    fwrite(endcode, 1, sizeof(endcode), f);
+    fclose(f);
+    avcodec_close(c);
+    av_free(c);
+    av_freep(&frame->data[0]);
+    avcodec_free_frame(&frame);
+    printf("\n");
+  
+}*/
+
+
 void setUpSimpleRendering(kore::SceneNode* renderNode, kore::ShaderProgramPass*
                           programPass, kore::Texture* texture, 
                           kore::LightComponent* light){
@@ -394,7 +710,11 @@ int main(void) {
 
   //////////////////////////////////////////////////////////////////////////
   //*/
-    
+
+  
+
+  initffmpeg("test.mp4",800,600,25);
+
   // Main loop
   while (running) {
     time = the_timer.timeSinceLastCall();
@@ -441,6 +761,11 @@ int main(void) {
     kore::GLerror::gl_ErrorCheckStart();
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT |GL_STENCIL_BUFFER_BIT);
     kore::RenderManager::getInstance()->renderFrame();
+
+    
+    if (glfwGetKey('R')) {
+     readbuffer();
+    }
     glfwSwapBuffers();
     kore::GLerror::gl_ErrorCheckFinish("Main Loop");
 
