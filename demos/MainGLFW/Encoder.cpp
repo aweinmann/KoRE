@@ -42,6 +42,7 @@ bool Encoder::init( char* filename, int width, int height )
   codecContext->time_base = timebase;
   codecContext->gop_size = 10; //keyframe every 10 frame
   codecContext->max_b_frames=1;
+  codecContext->mb_decision=2;
   codecContext->pix_fmt = PIX_FMT_YUV420P;
 
   AVDictionary* conf = NULL;
