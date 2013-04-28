@@ -17,8 +17,8 @@
   along with KoRE.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef KORE_SRC_DATATYPES_H_
-#define KORE_SRC_DATATYPES_H_
+#ifndef KORE_SRC_SHADERDATA_H_
+#define KORE_SRC_SHADERDATA_H_
 
 #include "KoRE/Common.h"
 
@@ -26,6 +26,9 @@ namespace kore {
   class SceneNodeComponent;
   class ShaderData {
   public:
+    ShaderData(const GLenum _type, const GLuint _size,
+               const std::string& _name, void* _data,
+               SceneNodeComponent* _comp);
     ShaderData(void);
     virtual ~ShaderData(void) {};
 
@@ -37,4 +40,4 @@ namespace kore {
   };
 }
 
-#endif
+#endif  // KORE_SRC_SHADERDATA_H_

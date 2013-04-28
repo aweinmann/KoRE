@@ -133,19 +133,29 @@ void koregui::RenderViewer::mousePressEvent(QMouseEvent * event) {
       _currentpath->setDest(mapToScene(event->pos()));
       _scene.addItem(_currentpath);
   }
+  if (item && item->data(0).toString() == "SHADERINPUT") {
+    ShaderInputItem* inputitem = static_cast<ShaderInputItem*>(item);
+    if (inputitem->getBinding() != NULL) {
+      _currentpath = inputitem->getBinding();
+      _currentpath->removeBinding();
+      _currentpath->setDest(mapToScene(event->pos()));
+    }
+  }
   QGraphicsView::mousePressEvent(event);
 }
 
 void koregui::RenderViewer::mouseReleaseEvent(QMouseEvent * event) {
   if(_currentpath) {
     if (_bindTarget) {
-      _bindTarget->reset();
-      _currentpath = NULL;
+      _currentpath->setEnd(_bindTarget);
+      if (_currentpath->initBinding()) {
+        kore::Log::getInstance()->write("[GUI] added new Binding\n");
+      }
       _bindTarget = NULL;
     } else {
       _scene.removeItem(_currentpath);
-      _currentpath = NULL;
     }
+     _currentpath = NULL;
   }
   QGraphicsView::mouseReleaseEvent(event);
 }
@@ -153,16 +163,15 @@ void koregui::RenderViewer::mouseReleaseEvent(QMouseEvent * event) {
 void koregui::RenderViewer::mouseMoveEvent(QMouseEvent *event) {
   if(_currentpath) {
     QGraphicsItem* item = itemAt(event->pos());
-    if (item && item->data(0).toString() == "SHADERINPUT"
-        && static_cast<ShaderInputItem*>(item)->checkInput(_currentpath)) {
+    if (item && item->data(0).toString() == "SHADERINPUT") {
       _bindTarget = static_cast<ShaderInputItem*>(item);
+      _bindTarget->setBinding(_currentpath);
+      _bindTarget->update();
       _currentpath->setEnd(_bindTarget);
-      item->update();
     } else {
       if(_bindTarget) {
         _currentpath->setEnd(NULL);
         _bindTarget->reset();
-        _bindTarget->update();
         _bindTarget = NULL;
       }
      _currentpath->setDest(mapToScene(event->pos()));

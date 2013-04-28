@@ -38,7 +38,10 @@ koregui::ComponentItem::ComponentItem(kore::SceneNodeComponent* component,
   std::vector<kore::ShaderData> sdata = _component->getShaderData();
   for (uint i = 0; i < sdata.size(); i++) {
     const kore::ShaderData* tmp = _component->getShaderData(sdata[i].name);
-    ShaderDataItem* dataitem =  new ShaderDataItem(tmp, this);
+    ShaderDataItem* dataitem =
+      new ShaderDataItem(tmp,
+                         static_cast<koregui::NodeItem*>(parentItem()),
+                         this);
     _shaderDataItems.push_back(dataitem);
     dataitem->setVisible(false);
     dataitem->setPos(192, 30 + 30 * i);
@@ -52,11 +55,16 @@ koregui::ComponentItem::~ComponentItem(void) {
 
 void koregui::ComponentItem::refresh(void) {
   _componentheight = 30;
-  if(_expanded) {
+  if (_expanded) {
     _componentheight += _shaderDataItems.size() * 30;
   }
   for (uint i= 0; i < _shaderDataItems.size(); i++) {
     _shaderDataItems[i]->setVisible(_expanded);
+    if (_expanded) {
+      _shaderDataItems[i]->setPos(192, 30 + 30 * i);
+    } else {
+      _shaderDataItems[i]->setPos(192, 4);
+    }
   }
   _componentwidth = 200;
   prepareGeometryChange();

@@ -26,6 +26,12 @@
 #include <QPainter>
 #include <QCursor>
 
+#include "KoRE/Operations/BindOperations/BindAttribute.h"
+#include "KoRE/Operations/BindOperations/BindUniform.h"
+#include "KoRE/Operations/BindOperations/BindTexture.h"
+#include "KoRE/Operations/BindOperations/BindImageTexture.h"
+#include "KoRE/Operations/RenderMesh.h"
+
 koregui::BindPathItem::BindPathItem(ShaderDataItem* start,
                                     ShaderInputItem* end,
                                     QGraphicsItem* parent)
@@ -57,4 +63,77 @@ void koregui::BindPathItem::paint(QPainter* painter, const QStyleOptionGraphicsI
 
   painter->setPen(QPen(QColor(200, 200, 200), 2));
   painter->drawPath(path);
+}
+
+bool koregui::BindPathItem::checkBinding(koregui::ShaderInputItem* target) {
+  // TODO(dospelt) implement check
+  return true;
+}
+
+bool koregui::BindPathItem::initBinding(void) {
+  kore::NodePass* nodePass = NULL;
+  // see if nodePass already exists
+  std::vector<kore::NodePass*> npasses =
+    _end->getShaderPass()->getProgramPass()->getNodePasses();
+  for (uint i = 0; i < npasses.size(); i++) {
+    if(npasses[i]->getSceneNode() == _start->getNodeItem()->getSceneNode()) {
+      nodePass = npasses[i];
+      break;
+    }
+  }
+  // if not, create new
+  if(!nodePass) {
+    nodePass = new kore::NodePass(_start->getNodeItem()->getSceneNode());
+    _end->getShaderPass()->getProgramPass()->addNodePass(nodePass);
+  }
+
+  kore::ShaderProgram* prog = const_cast<kore::ShaderProgram*>(
+    _end->getShaderPass()->getProgramPass()->getShaderProgram());
+
+  // attribute binding
+  if (_end->getInput()->input_type == GL_ACTIVE_ATTRIBUTES) {
+    _bindOP = new kore::BindAttribute(_start->getData(), _end->getInput());
+    nodePass->addOperation(_bindOP);
+    if(_start->getData()->component->getType() == kore::COMPONENT_MESH) {
+      // add renderMesh Op, if necessary
+      std::vector<kore::Operation*> ops = nodePass->getOperations();
+      if (ops[ops.size()-1]->getType() != kore::OP_RENDERMESH) {
+        kore::RenderMesh* _renderOP = new kore::RenderMesh(
+          static_cast<kore::MeshComponent*>(_start->getData()->component));
+          nodePass->addOperation(_renderOP);
+      }
+    }
+   return true;
+  }
+
+  // uniform binding
+  if(_end->getInput()->input_type == GL_ACTIVE_UNIFORMS) {
+    _bindOP = new kore::BindUniform(_start->getData(), _end->getInput());
+    nodePass->addOperation(_bindOP);
+    // texture binding
+    // TODO(dospelt)*/
+    return true;
+  }
+  return false;
+}
+
+void koregui::BindPathItem::removeBinding() {
+  kore::NodePass* nodePass = NULL;
+  std::vector<kore::NodePass*> npasses =
+    _end->getShaderPass()->getProgramPass()->getNodePasses();
+  for (uint i = 0; i < npasses.size(); i++) {
+    if(npasses[i]->getSceneNode() == _start->getNodeItem()->getSceneNode()) {
+      nodePass = npasses[i];
+      break;
+    }
+  }
+}
+
+void koregui::BindPathItem::startAnimation() {
+}
+
+void koregui::BindPathItem::stopAnimation() {
+}
+
+void koregui::BindPathItem::animate() {
 }

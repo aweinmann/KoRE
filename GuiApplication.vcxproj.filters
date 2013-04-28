@@ -49,9 +49,12 @@
     <ClCompile Include="src\KoRE_GUI\GeneratedFiles\Release\moc_ShaderEditor.cpp">
       <Filter>GeneratedFiles</Filter>
     </ClCompile>
+    <ClCompile Include="src\KoRE_GUI\OperationFlow.cpp" />
+    <ClCompile Include="src\KoRE_GUI\GeneratedFiles\Debug\moc_OperationFlow.cpp">
+      <Filter>GeneratedFiles</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="src\KoRE_GUI\BindPathItem.h" />
     <ClInclude Include="src\KoRE_GUI\ComponentItem.h" />
     <ClInclude Include="src\KoRE_GUI\FrameBufferStageItem.h" />
     <ClInclude Include="src\KoRE_GUI\ShaderInputItem.h" />
@@ -75,6 +78,8 @@
     <CustomBuild Include="src\KoRE_GUI\SceneViewer.h" />
     <CustomBuild Include="src\KoRE_GUI\FrameBufferEditor.ui" />
     <CustomBuild Include="src\KoRE_GUI\ShaderEditor.ui" />
+    <CustomBuild Include="src\KoRE_GUI\BindPathItem.h" />
+    <CustomBuild Include="src\KoRE_GUI\OperationFlow.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="GeneratedFiles">
